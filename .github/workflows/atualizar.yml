@@ -1,27 +1,22 @@
-name: Backfill mensal
-
-# Monta o histórico mensal por ação, que é o que permite comparar o acumulado
-# de hoje com o acumulado do mesmo período do ano anterior.
-# Rode uma vez ao montar o painel e depois todo dia 15, quando o Portal da
-# Transparência já publicou o mês fechado.
+name: Atualizar painel
 
 on:
-  workflow_dispatch:
-    inputs:
-      anos:
-        description: "Anos a baixar, separados por vírgula"
-        required: false
-        default: ""
   schedule:
-    - cron: "0 9 15 * *"
+    # 08:20 UTC = 05:20 em Brasília, depois da carga noturna do SIOP
+    - cron: "20 8 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: atualizar-painel
+  cancel-in-progress: false
+
 jobs:
-  backfill:
+  atualizar:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -37,25 +32,30 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           packages: |
+            any::orcamentoBR
             any::dplyr
             any::tidyr
             any::readr
             any::stringr
+            any::lubridate
+            any::jsonlite
             any::purrr
 
-      - name: Rodar o backfill
+      - name: Rodar o pipeline
         env:
-          ANOS_BACKFILL: ${{ github.event.inputs.anos }}
-        run: Rscript R/backfill_mensal.R
+          # Taxa de crescimento real de referência do Regime Fiscal Sustentável
+          # para o exercício. A banda da LC 200/2023 vai de 0,006 a 0,025.
+          RFS_TAXA: "0.025"
+        run: Rscript R/pipeline.R
 
-      - name: Publicar histórico
+      - name: Publicar resultados
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add historico
+          git add docs/dados historico
           if git diff --staged --quiet; then
-            echo "Sem mudanças."
+            echo "Sem mudanças nos dados."
           else
-            git commit -m "Histórico mensal — $(date -u +'%Y-%m-%d')"
+            git commit -m "Atualização automática — $(date -u +'%Y-%m-%d')"
             git push
           fi
