@@ -65,27 +65,68 @@ dir.create("historico", recursive = TRUE, showWarnings = FALSE)
 
 msg <- function(...) cat(format(Sys.time(), "[%H:%M:%S] "), ..., "\n", sep = "")
 
-# Localiza uma coluna pelo padrão do nome. O orcamentoBR já mudou rótulos entre
-# versões; isso evita quebrar o pipeline por causa de acento ou camelCase.
-col_de <- function(df, ...) {
-  padroes <- c(...)
-  nomes <- names(df)
-  for (p in padroes) {
-    hit <- nomes[str_detect(str_to_lower(nomes), str_to_lower(p))]
-    if (length(hit) > 0) return(hit[1])
+# Normaliza o nome de uma coluna em tokens separados por sublinhado, sem acento
+# e sem caixa: "Código da Unidade Orçamentária" e "codigoUnidadeOrcamentaria"
+# viram ambos "codigo_unidade_orcamentaria". Assim o reconhecimento não depende
+# da convenção de escrita que o SIOP usar.
+norm <- function(x) {
+  # chartr explícito em vez de iconv: a transliteração do iconv varia conforme
+  # o locale do runner e pode devolver "?" no lugar da letra acentuada.
+  x <- chartr("\u00e1\u00e0\u00e2\u00e3\u00e4\u00e9\u00e8\u00ea\u00eb\u00ed\u00ec\u00ee\u00ef\u00f3\u00f2\u00f4\u00f5\u00f6\u00fa\u00f9\u00fb\u00fc\u00e7\u00c1\u00c0\u00c2\u00c3\u00c4\u00c9\u00c8\u00ca\u00cb\u00cd\u00cc\u00ce\u00cf\u00d3\u00d2\u00d4\u00d5\u00d6\u00da\u00d9\u00db\u00dc\u00c7",
+              "aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC", x)
+  x <- gsub("([a-z0-9])([A-Z])", "\\1_\\2", x)
+  x <- tolower(x)
+  x <- gsub("[^a-z0-9]+", "_", x)
+  gsub("^_|_$", "", x)
+}
+
+tem_token <- function(nn, tokens) {
+  Reduce(`|`, lapply(tokens, function(t) grepl(paste0("(^|_)", t, "(_|$)"), nn)))
+}
+
+# Devolve código e descrição de uma dimensão. Entre as colunas candidatas, a de
+# valores mais curtos é tratada como código e a de valores mais longos como
+# descrição. Se houver uma só coluna no formato "1234 - Descrição", ela é
+# partida em duas.
+dimensao <- function(df, tokens, excluir = NULL) {
+  vazio <- list(cod = rep(NA_character_, nrow(df)), nome = rep(NA_character_, nrow(df)))
+  nn <- norm(names(df))
+  hit <- which(tem_token(nn, tokens))
+  if (length(excluir) && length(hit)) hit <- hit[!tem_token(nn[hit], excluir)]
+  if (!length(hit)) return(vazio)
+
+  cols <- lapply(hit, function(i) as.character(df[[i]]))
+  comprimento <- vapply(cols, function(v) {
+    v <- v[!is.na(v) & nzchar(v)]
+    if (!length(v)) return(Inf)
+    mean(nchar(v))
+  }, numeric(1))
+
+  i_cod  <- which.min(comprimento)
+  i_nome <- if (length(cols) > 1) which.max(comprimento) else i_cod
+  cod <- cols[[i_cod]]; nome <- cols[[i_nome]]
+
+  if (i_cod == i_nome) {
+    junto <- grepl("^\\s*[A-Za-z0-9.]+\\s+-\\s+\\S", cod)
+    if (mean(junto, na.rm = TRUE) > 0.5) {
+      nome <- sub("^\\s*[A-Za-z0-9.]+\\s+-\\s+", "", cod)
+      cod  <- sub("\\s+-\\s+.*$", "", trimws(cod))
+    }
+  } else {
+    cod <- sub("\\s+-\\s+.*$", "", trimws(cod))
   }
-  NA_character_
+  list(cod = trimws(cod), nome = trimws(nome))
 }
 
-pega <- function(df, ..., default = NA) {
-  cn <- col_de(df, ...)
-  if (is.na(cn)) return(rep(default, nrow(df)))
-  df[[cn]]
-}
-
-num <- function(x) {
-  if (is.numeric(x)) return(x)
-  suppressWarnings(as.numeric(gsub("[^0-9\\.\\-]", "", as.character(x))))
+# Coluna de valor: casa por substring simples, com exclusões explícitas.
+valor <- function(df, contem, sem = NULL) {
+  nn <- norm(names(df))
+  hit <- which(grepl(contem, nn))
+  if (length(sem) && length(hit)) hit <- hit[!grepl(sem, nn[hit])]
+  if (!length(hit)) return(rep(0, nrow(df)))
+  v <- df[[hit[1]]]
+  if (is.numeric(v)) return(v)
+  suppressWarnings(as.numeric(gsub("[^0-9.\\-]", "", as.character(v))))
 }
 
 # ---------------------------------------------------------------------------
@@ -117,33 +158,47 @@ baixa_despesa <- function(ano) {
 }
 
 padroniza <- function(df, ano) {
-  tibble(
+  msg("Colunas devolvidas pelo SIOP: ", paste(names(df), collapse = " | "))
+
+  org  <- dimensao(df, c("orgao"),     excluir = c("unidade", "uo"))
+  uo   <- dimensao(df, c("uo", "unidade", "orcamentaria"))
+  fn   <- dimensao(df, c("funcao"),    excluir = c("sub"))
+  sfn  <- dimensao(df, c("subfuncao"))
+  prog <- dimensao(df, c("programa"))
+  ac   <- dimensao(df, c("acao"))
+  gnd  <- dimensao(df, c("gnd", "grupo"))
+  rp   <- dimensao(df, c("resultado"))
+  esf  <- dimensao(df, c("esfera"))
+
+  saida <- tibble(
     exercicio   = ano,
-    esfera      = as.character(pega(df, "^esfera$", "esfera")),
-    orgao_cod   = as.character(pega(df, "codigo.*orgao", "orgao.*codigo", "^orgao$")),
-    orgao_nome  = as.character(pega(df, "orgao.*(nome|descri)", "nome.*orgao")),
-    uo_cod      = as.character(pega(df, "codigo.*unidade", "unidade.*codigo", "^uo$", "unidade")),
-    uo_nome     = as.character(pega(df, "unidade.*(nome|descri)", "nome.*unidade")),
-    funcao_cod  = as.character(pega(df, "codigo.*funcao(?!.*sub)", "^funcao$")),
-    funcao_nome = as.character(pega(df, "funcao.*(nome|descri)")),
-    subfuncao   = as.character(pega(df, "subfuncao")),
-    programa    = as.character(pega(df, "programa")),
-    acao_cod    = as.character(pega(df, "codigo.*acao", "^acao$")),
-    acao_nome   = as.character(pega(df, "acao.*(nome|descri)", "nome.*acao")),
-    gnd_cod     = as.character(pega(df, "codigo.*gnd", "^gnd$", "grupo.*despesa")),
-    gnd_nome    = as.character(pega(df, "gnd.*(nome|descri)", "grupo.*(nome|descri)")),
-    rp_cod      = as.character(pega(df, "codigo.*resultado", "resultado.*primario")),
-    ploa        = num(pega(df, "ploa", default = 0)),
-    loa         = num(pega(df, "^valorloa$", "loa(?!.*credito)", default = 0)),
-    dotacao     = num(pega(df, "credito", default = 0)),
-    empenhado   = num(pega(df, "empenhado", default = 0)),
-    liquidado   = num(pega(df, "liquidado", default = 0)),
-    pago        = num(pega(df, "pago", default = 0))
+    esfera      = esf$nome,
+    orgao_cod   = org$cod,  orgao_nome  = org$nome,
+    uo_cod      = uo$cod,   uo_nome     = uo$nome,
+    funcao_cod  = fn$cod,   funcao_nome = fn$nome,
+    subfuncao   = sfn$cod,
+    programa    = prog$cod,
+    acao_cod    = ac$cod,   acao_nome   = ac$nome,
+    gnd_cod     = gnd$cod,  gnd_nome    = gnd$nome,
+    rp_cod      = rp$cod,
+    ploa        = valor(df, "ploa"),
+    loa         = valor(df, "loa", sem = "credito|ploa"),
+    dotacao     = valor(df, "credito"),
+    empenhado   = valor(df, "empenhado"),
+    liquidado   = valor(df, "liquidado"),
+    pago        = valor(df, "pago")
   ) %>%
-    mutate(across(c(ploa, loa, dotacao, empenhado, liquidado, pago),
-                  ~ replace_na(.x, 0))) %>%
-    # Limpa códigos: o SIOP às vezes devolve "26000 - Ministério da Educação"
-    mutate(across(ends_with("_cod"), ~ str_trim(str_replace(.x, "\\s*-.*$", "")))) %>%
+    mutate(across(c(ploa, loa, dotacao, empenhado, liquidado, pago), ~ replace_na(.x, 0)))
+
+  # Diagnóstico: se uma dimensão não foi reconhecida, o painel inteiro colapsa.
+  # Melhor descobrir aqui, no log, do que num agregado com quatro linhas.
+  for (col in c("orgao_cod", "uo_cod", "funcao_cod", "acao_cod", "gnd_cod")) {
+    n_dist <- n_distinct(saida[[col]], na.rm = TRUE)
+    msg("  ", col, ": ", n_dist, " valores distintos")
+    if (n_dist == 0) warning("Dimensão não reconhecida: ", col, call. = FALSE)
+  }
+
+  saida %>%
     group_by(exercicio, esfera, orgao_cod, orgao_nome, uo_cod, uo_nome,
              funcao_cod, funcao_nome, acao_cod, acao_nome, gnd_cod, gnd_nome, rp_cod) %>%
     summarise(across(c(ploa, loa, dotacao, empenhado, liquidado, pago), sum, na.rm = TRUE),
@@ -154,6 +209,16 @@ atual    <- padroniza(baixa_despesa(P$exercicio), P$exercicio)
 anterior <- padroniza(baixa_despesa(P$exercicio - 1L), P$exercicio - 1L)
 
 msg("Linhas coletadas: ", nrow(atual), " (t) e ", nrow(anterior), " (t-1)")
+
+# Trava de sanidade: o orçamento federal tem milhares de ações. Se chegou aqui
+# com poucas, alguma dimensão não foi reconhecida e o painel sairia vazio.
+# Melhor interromper do que sobrescrever os dados bons com uma base quebrada.
+n_acoes_distintas <- n_distinct(atual$acao_cod, na.rm = TRUE)
+if (n_acoes_distintas < 200) {
+  stop("Apenas ", n_acoes_distintas, " ações distintas reconhecidas. ",
+       "Confira, no log acima, a linha 'Colunas devolvidas pelo SIOP' e ajuste ",
+       "os tokens em dimensao() no alto deste script.")
+}
 
 # ---------------------------------------------------------------------------
 # 2. Deflator IPCA
