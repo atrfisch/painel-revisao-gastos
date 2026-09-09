@@ -201,7 +201,8 @@ padroniza <- function(df, ano) {
   saida %>%
     group_by(exercicio, esfera, orgao_cod, orgao_nome, uo_cod, uo_nome,
              funcao_cod, funcao_nome, acao_cod, acao_nome, gnd_cod, gnd_nome, rp_cod) %>%
-    summarise(across(c(ploa, loa, dotacao, empenhado, liquidado, pago), sum, na.rm = TRUE),
+    summarise(across(c(ploa, loa, dotacao, empenhado, liquidado, pago),
+                     \(x) sum(x, na.rm = TRUE)),
               .groups = "drop")
 }
 
@@ -295,7 +296,10 @@ if (tem_hist) {
       mutate(acum = cumsum(emp), total = sum(emp)) %>%
       filter(total > 0) %>%
       summarise(
-        !!nome_perfil := acum[max(which(mes <= mes_corrente))] / total[1],
+        !!nome_perfil := {
+          i <- which(mes <= mes_corrente)
+          if (length(i)) acum[max(i)] / total[1] else NA_real_
+        },
         dez = sum(emp[mes == 12]) / total[1],
         .groups = "drop"
       )
@@ -609,13 +613,27 @@ msg("JSONs escritos: ", nrow(acoes), " ações")
 hoje <- Sys.Date()
 snap_ag <- base %>%
   group_by(funcao_cod, gnd_cod) %>%
-  summarise(across(c(loa, dotacao, empenhado, liquidado, pago), sum), .groups = "drop") %>%
+  summarise(across(c(loa, dotacao, empenhado, liquidado, pago),
+                   \(x) sum(x, na.rm = TRUE)), .groups = "drop") %>%
   mutate(data = hoje, .before = 1)
 
 arq_ag <- "historico/serie_diaria_agregada.csv.gz"
 if (file.exists(arq_ag)) {
-  antigo <- read_csv(arq_ag, show_col_types = FALSE) %>% filter(as.Date(data) != hoje)
-  snap_ag <- bind_rows(antigo, snap_ag)
+  # Tipos explícitos: uma execução anterior pode ter gravado uma coluna vazia,
+  # que o leitor interpretaria como lógica e recusaria juntar com texto.
+  antigo <- tryCatch(
+    read_csv(arq_ag, show_col_types = FALSE,
+             col_types = cols(data = col_date(),
+                              funcao_cod = col_character(),
+                              gnd_cod = col_character(),
+                              .default = col_double())) %>%
+      filter(as.Date(data) != hoje),
+    error = function(e) {
+      msg("AVISO: histórico agregado ilegível (", conditionMessage(e), "). Recomeçando o arquivo.")
+      NULL
+    }
+  )
+  if (!is.null(antigo) && nrow(antigo)) snap_ag <- bind_rows(antigo, snap_ag)
 }
 write_csv(snap_ag, arq_ag)
 
