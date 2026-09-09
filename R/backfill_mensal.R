@@ -19,13 +19,24 @@ suppressPackageStartupMessages({
 
 options(timeout = 1800, scipen = 999)
 
-ANOS <- as.integer(Sys.getenv("ANOS_BACKFILL",
-                              paste(seq(as.integer(format(Sys.Date(), "%Y")) - 2,
-                                        as.integer(format(Sys.Date(), "%Y"))),
-                                    collapse = ",")) %>%
-                     str_split(",", simplify = TRUE))
+ANO_ATUAL <- as.integer(format(Sys.Date(), "%Y"))
 
-URL_BASE <- "https://portaldatransparencia.gov.br/download-de-dados/despesas-execucao/%s"
+# Atenção: Sys.getenv devolve string vazia quando a variável existe mas está em
+# branco, e nesse caso o valor padrão do próprio Sys.getenv não é aplicado.
+entrada <- str_trim(Sys.getenv("ANOS_BACKFILL", ""))
+ANOS <- if (nzchar(entrada)) {
+  as.integer(str_trim(str_split(entrada, ",", simplify = TRUE)))
+} else {
+  seq(ANO_ATUAL - 2L, ANO_ATUAL)
+}
+ANOS <- ANOS[!is.na(ANOS)]
+if (!length(ANOS)) stop("Nenhum ano válido informado em ANOS_BACKFILL.")
+
+# Endereço direto do arquivo no repositório de dados abertos da CGU. A página do
+# Portal da Transparência apenas redireciona para cá.
+URL_DIRETA <- "https://dadosabertos-download.cgu.gov.br/PortalDaTransparencia/saida/despesas-execucao/%s_Despesas.zip"
+URL_PORTAL <- "https://portaldatransparencia.gov.br/download-de-dados/despesas-execucao/%s"
+AGENTE <- "painel-revisao-gastos (R script; dados abertos)"
 
 msg <- function(...) cat(format(Sys.time(), "[%H:%M:%S] "), ..., "\n", sep = "")
 
@@ -39,19 +50,30 @@ acha <- function(nomes, ...) {
   NA_character_
 }
 
+baixa <- function(url, destino) {
+  tryCatch({
+    suppressWarnings(
+      download.file(url, destino, mode = "wb", quiet = TRUE,
+                    headers = c("User-Agent" = AGENTE))
+    )
+    tam <- file.info(destino)$size
+    isTRUE(!is.na(tam) && tam > 1000)
+  }, error = function(e) FALSE)
+}
+
 le_mes <- function(ano, mes) {
   ref <- sprintf("%d%02d", ano, mes)
-  url <- sprintf(URL_BASE, ref)
   tmp <- tempfile(fileext = ".zip")
-  ok <- tryCatch({
-    download.file(url, tmp, mode = "wb", quiet = TRUE); TRUE
-  }, error = function(e) FALSE)
-  if (!ok || file.size(tmp) < 1000) {
+  ok <- baixa(sprintf(URL_DIRETA, ref), tmp)
+  if (!ok) ok <- baixa(sprintf(URL_PORTAL, ref), tmp)
+  if (!ok) {
     msg("  ", ref, ": indisponível, pulando")
     return(NULL)
   }
   destino <- tempfile(); dir.create(destino)
-  utils::unzip(tmp, exdir = destino)
+  desempacotou <- tryCatch({ utils::unzip(tmp, exdir = destino); TRUE },
+                           error = function(e) FALSE, warning = function(w) FALSE)
+  if (!desempacotou) { msg("  ", ref, ": arquivo ilegível, pulando"); return(NULL) }
   csv <- list.files(destino, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
   if (!length(csv)) { msg("  ", ref, ": zip sem csv"); return(NULL) }
 
@@ -96,16 +118,24 @@ le_mes <- function(ano, mes) {
 }
 
 msg("Baixando execução mensal para: ", paste(ANOS, collapse = ", "))
+# Um mês que falha nunca derruba a execução inteira: o que veio é aproveitado.
 todos <- map_dfr(ANOS, function(a) {
   msg("Ano ", a)
   map_dfr(1:12, function(m) {
-    if (a == as.integer(format(Sys.Date(), "%Y")) && m > as.integer(format(Sys.Date(), "%m")))
-      return(NULL)
-    le_mes(a, m)
+    if (a == ANO_ATUAL && m > as.integer(format(Sys.Date(), "%m"))) return(NULL)
+    tryCatch(le_mes(a, m), error = function(e) {
+      msg("  ", sprintf("%d%02d", a, m), ": erro (", conditionMessage(e), "), pulando")
+      NULL
+    })
   })
 })
 
-if (!nrow(todos)) stop("Nenhum mês baixado. Verifique a URL do Portal da Transparência.")
+if (!nrow(todos)) {
+  stop("Nenhum mês baixado. Confira se o endereço dos arquivos mudou:\n  ",
+       sprintf(URL_DIRETA, paste0(ANO_ATUAL - 1L, "01")))
+}
+msg("Meses efetivamente baixados: ",
+    paste(sort(unique(paste0(todos$exercicio, sprintf("%02d", todos$mes)))), collapse = ", "))
 
 # O arquivo do Portal pode vir acumulado no ano ou com o valor do mês.
 # Detecta comparando a mediana do crescimento mês a mês e, se for acumulado,
