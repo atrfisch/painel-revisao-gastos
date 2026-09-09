@@ -13,6 +13,12 @@ concurrency:
   group: atualizar-painel
   cancel-in-progress: false
 
+env:
+  # Biblioteca de pacotes fora da árvore do repositório, para não entrar em commit
+  R_LIBS_USER: /home/runner/rlib
+  # Espelho da Posit com binários para o Ubuntu jammy
+  REPO_CRAN: https://packagemanager.posit.co/cran/__linux__/jammy/latest
+
 jobs:
   atualizar:
     runs-on: ubuntu-22.04
@@ -29,17 +35,25 @@ jobs:
           r-version: "4.4.3"
           use-public-rspm: true
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
+      - name: Reaproveitar pacotes já instalados
+        uses: actions/cache@v4
         with:
-          packages: |
-            any::orcamentoBR
-            any::dplyr
-            any::tidyr
-            any::readr
-            any::stringr
-            any::lubridate
-            any::jsonlite
-            any::purrr
+          path: /home/runner/rlib
+          key: rlib-jammy-4.4.3-v1
+
+      - name: Instalar pacotes de R
+        shell: Rscript {0}
+        run: |
+          lib <- Sys.getenv("R_LIBS_USER")
+          dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+          .libPaths(lib)
+          options(repos = c(CRAN = Sys.getenv("REPO_CRAN")), timeout = 900)
+          pacotes <- c("orcamentoBR", "dplyr", "tidyr", "readr",
+                       "stringr", "lubridate", "jsonlite", "purrr")
+          faltando <- setdiff(pacotes, rownames(installed.packages(lib.loc = lib)))
+          if (length(faltando)) install.packages(faltando, lib = lib)
+          for (p in pacotes) library(p, character.only = TRUE, lib.loc = lib)
+          cat("Pacotes prontos.\n")
 
       - name: Rodar o pipeline
         env:
