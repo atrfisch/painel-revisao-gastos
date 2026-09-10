@@ -45,15 +45,8 @@ P <- list(
   lim_credito        = 0.30,     # dotação 30% acima da LOA
   lim_exec_simbolica = 0.05,     # menos de 5% da dotação empenhada
   lim_dezembro       = 0.40,     # mais de 40% do empenho do ano em dezembro
-  lim_z_robusto      = 3,        # desvio robusto dentro da função
   frag_teto_uo       = 5e6,      # dotação por UO abaixo disso conta como pulverizada
   frag_min_uo        = 10,       # ação presente em 10+ UOs
-  # Regime Fiscal Sustentável (LC 200/2023): banda de crescimento real anual da
-  # despesa primária. A taxa de referência do exercício pode ser sobrescrita
-  # pela variável de ambiente RFS_TAXA no workflow.
-  rfs_taxa           = as.numeric(Sys.getenv("RFS_TAXA", "0.025")),
-  rfs_piso           = 0.006,
-  rfs_teto           = 0.025,
   # Resultado primário considerado discricionário (espaço de manobra real)
   rp_discricionario  = c("2", "6", "7", "8", "9"),
   # Funções sem sentido de revisão por desvio (excluídas do ranking, não da base)
@@ -368,30 +361,11 @@ base <- atual %>%
                            empenhado / emp_ant_real - 1, NA_real_),
     desvio_ano_rs = ifelse(!is.na(emp_ant_real), empenhado - emp_ant_real, NA_real_),
 
-    # ---- Eixo C: crescimento admitido pelo Regime Fiscal Sustentável -------
-    # O limite da LC 200/2023 vale para o agregado da despesa primária de cada
-    # Poder e órgão autônomo, não para a ação individual. Aqui ele entra como
-    # régua de comparação: quanto a ação teria empenhado se tivesse crescido
-    # exatamente na taxa de referência do regime.
-    emp_rfs       = emp_ant_real * (1 + P$rfs_taxa),
-    desvio_rfs_rs = ifelse(!is.na(emp_ant_real), empenhado - emp_rfs, NA_real_),
-    var_vs_rfs    = ifelse(!is.na(var_real), var_real - P$rfs_taxa, NA_real_),
 
     # ---- classificação ------------------------------------------------------
     discricionaria = rp_cod %in% P$rp_discricionario,
     revisavel = discricionaria & !(funcao_cod %in% P$funcoes_excluidas)
   )
-
-# Desvio robusto dentro da função (mediana e MAD, não média e desvio-padrão:
-# a distribuição de variações orçamentárias é fortemente assimétrica).
-base <- base %>%
-  group_by(funcao_cod) %>%
-  mutate(
-    med_fn = median(var_real, na.rm = TRUE),
-    mad_fn = mad(var_real, na.rm = TRUE),
-    z_robusto = ifelse(!is.na(mad_fn) & mad_fn > 0, (var_real - med_fn) / mad_fn, NA_real_)
-  ) %>%
-  ungroup()
 
 # ---------------------------------------------------------------------------
 # 5. Triagem: oportunidades de ajuste
@@ -417,10 +391,6 @@ base <- base %>%
       !is.na(var_real) & var_real > P$lim_expansao_real &
       !is.na(desvio_ano_rs) & desvio_ano_rs >= P$piso_material,
 
-    op_acima_rfs = revisavel &
-      !is.na(var_vs_rfs) & var_vs_rfs > 0 &
-      !is.na(desvio_rfs_rs) & desvio_rfs_rs >= P$piso_material,
-
     op_retracao = revisavel &
       !is.na(var_real) & var_real < P$lim_retracao_real &
       !is.na(desvio_ano_rs) & abs(desvio_ano_rs) >= P$piso_material,
@@ -438,9 +408,6 @@ base <- base %>%
     op_dezembro = !is.na(dez_share) & dez_share > P$lim_dezembro &
       dotacao >= P$piso_material,
 
-    op_outlier = revisavel & !is.na(z_robusto) & abs(z_robusto) > P$lim_z_robusto &
-      abs(desvio_ano_rs) >= P$piso_material,
-
     n_sinais = rowSums(across(starts_with("op_")), na.rm = TRUE),
 
     # Espaço fiscal indicativo, por regra
@@ -449,7 +416,6 @@ base <- base %>%
       op_simbolica    ~ dotacao - empenhado,
       op_credito      ~ dotacao - loa,
       op_expansao     ~ desvio_ano_rs,
-      op_acima_rfs    ~ desvio_rfs_rs,
       TRUE            ~ NA_real_
     )
   )
@@ -469,7 +435,6 @@ agrega <- function(df, ...) {
       pago          = sum(pago, na.rm = TRUE),
       esperado_loa  = sum(esperado_loa, na.rm = TRUE),
       emp_ant_real  = sum(emp_ant_real, na.rm = TRUE),
-      emp_rfs       = sum(emp_rfs, na.rm = TRUE),
       n_acoes       = n(),
       .groups = "drop"
     ) %>%
@@ -477,9 +442,7 @@ agrega <- function(df, ...) {
       desvio_loa_rs = empenhado - esperado_loa,
       desvio_loa_pc = ifelse(esperado_loa > 0, empenhado / esperado_loa - 1, NA_real_),
       desvio_ano_rs = ifelse(emp_ant_real > 0, empenhado - emp_ant_real, NA_real_),
-      var_real      = ifelse(emp_ant_real > 0, empenhado / emp_ant_real - 1, NA_real_),
-      desvio_rfs_rs = ifelse(emp_rfs > 0, empenhado - emp_rfs, NA_real_),
-      var_vs_rfs    = ifelse(emp_ant_real > 0, var_real - P$rfs_taxa, NA_real_)
+      var_real      = ifelse(emp_ant_real > 0, empenhado / emp_ant_real - 1, NA_real_)
     )
 }
 
@@ -496,16 +459,14 @@ mil <- function(x) round(replace_na(x, 0) / 1000)      # valores em R$ mil
 pc  <- function(x) ifelse(is.na(x), NA, round(x, 4))
 
 regras <- tribble(
-  ~id,              ~rotulo,                              ~descricao,
-  "subexecucao",    "Subexecução persistente",            "Empenho muito abaixo do ritmo esperado para a data e execução fraca também no ano anterior. Dotação provavelmente superestimada.",
-  "simbolica",      "Dotação sem execução",               "Ação com dotação relevante e execução quase nula em dois exercícios. Pede exame do desenho da ação.",
-  "credito",        "Dotação inflada por créditos",       "Dotação atual muito acima da LOA. Indica erro de previsão na proposta ou realocação não planejada.",
-  "expansao",       "Expansão real acelerada",            "Crescimento real relevante contra o mesmo período do ano anterior. Pede exame dos parâmetros de custo e de elegibilidade.",
-  "acima_rfs",      "Acima do crescimento do regime fiscal", "Crescimento real superior à taxa de referência do Regime Fiscal Sustentável. O limite legal é agregado, não por ação: aqui serve como régua de comparação.",
-  "retracao",       "Retração real acentuada",            "Queda real relevante. Pode indicar problema de entrega, não economia.",
-  "fragmentacao",   "Execução pulverizada",               "Mesma ação com dotações pequenas espalhadas por muitas unidades. Custo administrativo tende a superar o benefício.",
-  "dezembro",       "Concentração no fim do exercício",   "Parcela alta do empenho anual concentrada em dezembro no ano anterior. Sinal clássico de gasto de baixa qualidade.",
-  "outlier",        "Desvio atípico na função",           "Variação muito distante da mediana das demais ações da mesma função (escore robusto)."
+  ~id,              ~rotulo,                            ~descricao,
+  "subexecucao",    "Subexecução persistente",          "Empenhou bem menos do que o ritmo desta altura do ano pedia, e também executou pouco no ano passado. Sinal de dotação superestimada.",
+  "simbolica",      "Dotação sem execução",             "Tem dotação relevante e praticamente nada empenhado, em dois exercícios seguidos. O desenho da ação é o que está em questão.",
+  "credito",        "Dotação inflada por créditos",     "A dotação atual ficou muito acima do que a LOA previu. Indica erro de previsão na proposta ou realocação ao longo do ano.",
+  "expansao",       "Expansão real acelerada",          "Gastou bem mais do que no mesmo período do ano passado, já descontada a inflação. Pede exame dos parâmetros de custo e de quem tem direito.",
+  "retracao",       "Retração real acentuada",          "Gastou bem menos do que no mesmo período do ano passado, em termos reais. Pode ser economia, mas também pode ser entrega travada.",
+  "fragmentacao",   "Execução pulverizada",             "A mesma ação aparece com valores pequenos espalhados por muitas unidades. O custo de administrar tende a superar o benefício.",
+  "dezembro",       "Concentração no fim do exercício", "No ano passado, boa parte do empenho saiu em dezembro. É o padrão clássico de gasto feito para não perder dotação."
 )
 
 resumo_regras <- lapply(seq_len(nrow(regras)), function(i) {
@@ -536,14 +497,11 @@ meta <- list(
     dotacao   = mil(sum(base$dotacao)),
     empenhado = mil(sum(base$empenhado)),
     liquidado = mil(sum(base$liquidado)),
-    pago      = mil(sum(base$pago))
-  ),
-  rfs = list(
-    taxa = P$rfs_taxa, piso = P$rfs_piso, teto = P$rfs_teto,
-    crescimento_agregado = with(base[!is.na(base$emp_ant_real) & base$emp_ant_real > 0, ],
-                                sum(empenhado) / sum(emp_ant_real) - 1),
-    empenhado_comparavel = mil(sum(base$empenhado[!is.na(base$emp_ant_real) & base$emp_ant_real > 0])),
-    excesso_agregado = mil(sum(base$desvio_rfs_rs, na.rm = TRUE))
+    pago      = mil(sum(base$pago)),
+    esperado  = mil(sum(base$esperado_loa, na.rm = TRUE)),
+    ant       = mil(sum(base$emp_ant_real, na.rm = TRUE)),
+    emp_comparavel = mil(sum(base$empenhado[!is.na(base$emp_ant_real) & base$emp_ant_real > 0])),
+    n_sinalizadas  = sum(base$n_sinais > 0, na.rm = TRUE)
   ),
   parametros = P[c("piso_material", "lim_subexecucao", "lim_expansao_real",
                    "lim_credito", "lim_exec_simbolica", "lim_dezembro")]
@@ -556,7 +514,6 @@ prep_ag <- function(df) {
               esperado = mil(esperado_loa), ant = mil(emp_ant_real),
               d_loa = mil(desvio_loa_rs), p_loa = pc(desvio_loa_pc),
               d_ano = mil(desvio_ano_rs), p_ano = pc(var_real),
-              d_rfs = mil(desvio_rfs_rs), p_rfs = pc(var_vs_rfs),
               n = n_acoes) %>%
     arrange(desc(abs(d_loa)))
 }
@@ -591,8 +548,7 @@ acoes <- base %>%
     esp = mil(esperado_loa), ant = mil(emp_ant_real),
     dloa = mil(desvio_loa_rs), dano = mil(desvio_ano_rs),
     pdot = pc(var_dotacao), pexec = pc(exec_dotacao),
-    prit = pc(desvio_ritmo), pano = pc(var_real), z = pc(z_robusto),
-    drfs = mil(desvio_rfs_rs), prfs = pc(var_vs_rfs),
+    prit = pc(desvio_ritmo), pano = pc(var_real),
     perf = pc(perfil_esperado), oper = origem_perfil,
     espaco = mil(espaco), sinais = n_sinais,
     ops = ops
