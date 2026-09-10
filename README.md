@@ -1,4 +1,4 @@
-# Painel de revisão de gastos
+# Painel de Monitoramento de gastos
 
 Triagem diária das ações orçamentárias federais que se afastam de dois parâmetros:
 o previsto na LOA e o executado no mesmo período do exercício anterior, em termos reais.
