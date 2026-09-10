@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Monitor de gastos — ações orçamentárias desviantes</title>
+<title>Revisão de gastos — ações orçamentárias desviantes</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,51 +13,52 @@
 
 <header class="topo">
   <div class="topo-in">
-    <h1>Monitor de gastos</h1>
+    <h1>Revisão de gastos</h1>
     <p class="sub" id="subtitulo">Carregando…</p>
   </div>
 </header>
 
 <main>
 
-<!-- ------------------------------------------------------------------ -->
-<section class="bloco" id="bloco-oportunidades">
+<!-- ---------------------------------------------------------------- -->
+<section class="placar" id="placar" aria-label="Números do exercício"></section>
+
+<!-- ---------------------------------------------------------------- -->
+<section class="bloco" id="bloco-atencao">
   <div class="cabecalho">
     <h2>Despesas que demandam atenção</h2>
-    <p>Cada faixa reúne as ações que acionaram uma das regras de triagem, com a ordem
-       de grandeza do montante envolvido. Clique para filtrar a lista de ações.</p>
+    <p id="resumo-atencao">Cada categoria reúne as ações que acionaram uma regra de
+       triagem. Clique numa delas para filtrar a lista de ações lá embaixo.</p>
   </div>
-  <div class="regua" id="regua" role="group" aria-label="Regras de triagem"></div>
+  <div class="regua" id="regua" role="group" aria-label="Categorias de triagem"></div>
   <p class="ressalva">O montante envolvido é o que está sob a regra, não uma economia
-     apurada nem uma redução proposta. Cada faixa aponta o que merece exame; o que fazer
-     depende do exame.</p>
+     apurada nem uma redução proposta. Cada categoria aponta o que merece exame; o que
+     fazer depende do exame.</p>
 </section>
 
-<!-- ------------------------------------------------------------------ -->
+<!-- ---------------------------------------------------------------- -->
 <section class="bloco">
   <div class="cabecalho linha-cabecalho">
     <div>
       <h2>Maiores variações</h2>
-      <p>Barras à direita do eixo indicam gasto acima do parâmetro; à esquerda, abaixo.</p>
+      <p>Barra para a direita, gasto acima do parâmetro; para a esquerda, abaixo.
+         Cada quadro rola para mostrar mais posições.</p>
     </div>
     <div class="chaveiro" role="radiogroup" aria-label="Parâmetro de comparação">
       <button class="chave ativo" data-metrica="loa" role="radio" aria-checked="true">Contra a LOA</button>
       <button class="chave" data-metrica="ano" role="radio" aria-checked="false">Contra o ano anterior, em termos reais</button>
-      <button class="chave" data-metrica="rfs" role="radio" aria-checked="false">Contra o Regime Fiscal Sustentável</button>
     </div>
   </div>
 
-  <p class="nota-rfs" id="nota-rfs" hidden></p>
-
   <div class="grade-graficos">
-    <figure class="grafico"><figcaption>Função orçamentária</figcaption><div id="g-funcao"></div></figure>
-    <figure class="grafico"><figcaption>Órgão</figcaption><div id="g-orgao"></div></figure>
-    <figure class="grafico"><figcaption>Unidade orçamentária</figcaption><div id="g-uo"></div></figure>
-    <figure class="grafico"><figcaption>Grupo de natureza da despesa</figcaption><div id="g-gnd"></div></figure>
+    <figure class="grafico"><figcaption>Função orçamentária</figcaption><div class="rolar" id="g-funcao"></div></figure>
+    <figure class="grafico"><figcaption>Órgão</figcaption><div class="rolar" id="g-orgao"></div></figure>
+    <figure class="grafico"><figcaption>Unidade orçamentária</figcaption><div class="rolar" id="g-uo"></div></figure>
+    <figure class="grafico"><figcaption>Grupo de natureza da despesa</figcaption><div class="rolar" id="g-gnd"></div></figure>
   </div>
 </section>
 
-<!-- ------------------------------------------------------------------ -->
+<!-- ---------------------------------------------------------------- -->
 <section class="bloco">
   <div class="cabecalho linha-cabecalho">
     <div>
@@ -69,52 +70,35 @@
 
   <div class="filtros">
     <input type="search" id="busca" placeholder="Buscar ação, unidade, órgão ou código">
-    <select id="f-funcao"><option value="">Todas as funções</option></select>
-    <select id="f-gnd"><option value="">Todos os grupos de despesa</option></select>
-    <select id="f-tipo">
+    <select id="f-funcao" aria-label="Função"><option value="">Todas as funções</option></select>
+    <select id="f-gnd" aria-label="Grupo de despesa"><option value="">Todos os grupos de despesa</option></select>
+    <select id="f-tipo" aria-label="Tipo de despesa">
       <option value="">Obrigatórias e discricionárias</option>
       <option value="1">Só discricionárias e emendas</option>
       <option value="0">Só obrigatórias</option>
     </select>
-    <select id="f-ordem">
-      <option value="dloa">Ordenar por desvio contra a LOA</option>
-      <option value="dano">Ordenar por variação real no ano</option>
-      <option value="drfs">Ordenar por distância do regime fiscal</option>
-      <option value="espaco">Ordenar por montante envolvido</option>
-      <option value="dot">Ordenar por dotação</option>
-    </select>
     <button class="botao fraco" id="limpar">Limpar filtros</button>
   </div>
 
+  <p class="dica">Clique no título de qualquer coluna para ordenar por ela. Um segundo
+     clique inverte a ordem.</p>
+
   <div class="rolagem">
     <table id="tabela">
-      <thead>
-        <tr>
-          <th>Ação</th>
-          <th>Unidade orçamentária</th>
-          <th>Função</th>
-          <th class="n">Dotação</th>
-          <th class="n">Empenhado</th>
-          <th class="n">Esperado hoje</th>
-          <th class="n">Desvio LOA</th>
-          <th class="n">Var. real ano</th>
-          <th class="n">Regime fiscal</th>
-          <th>Sinais</th>
-        </tr>
-      </thead>
+      <thead><tr id="cabecalho-tabela"></tr></thead>
       <tbody></tbody>
     </table>
   </div>
   <button class="botao fraco" id="mais">Mostrar mais</button>
 </section>
 
-<!-- ------------------------------------------------------------------ -->
+<!-- ---------------------------------------------------------------- -->
 <section class="bloco nota">
   <h2>Como os números são construídos</h2>
 
   <h3>Os dois parâmetros</h3>
-  <p><strong>Contra a LOA.</strong> Comparar o empenhado com a dotação inteira em
-  setembro não diz nada: nenhuma ação gasta um doze avos por mês. O painel compara
+  <p><strong>Contra a LOA.</strong> Comparar o empenhado com a dotação inteira no
+  meio do ano não diz nada: nenhuma ação gasta um doze avos por mês. O painel compara
   o empenhado com o valor esperado <em>para esta data</em>, que é a dotação
   multiplicada pela fração do gasto anual que aquela mesma ação já havia realizado
   até este mês no ano anterior. Quando a ação não existia, usa-se o perfil da
@@ -127,41 +111,20 @@
   consolidada publicada pelo Portal da Transparência, porque a consulta ao SIOP
   devolve valores acumulados no momento do acesso, sem dimensão de mês.</p>
 
-  <p><strong>Contra o Regime Fiscal Sustentável.</strong> A LC 200/2023 admite
-  crescimento real da despesa primária entre 0,6% e 2,5% ao ano, dentro desse
-  intervalo atrelado a 70% da variação real da receita primária quando a meta de
-  resultado do exercício anterior foi cumprida, e a 50% quando não foi. O painel toma
-  a taxa de referência do exercício e calcula quanto cada ação teria empenhado se
-  tivesse crescido exatamente nela; a diferença contra o empenho observado é a terceira
-  coluna de desvio. Como o indexador de correção do próprio limite é o IPCA, o deflator
-  do painel e a régua do regime falam a mesma língua.</p>
-
-  <p>Duas ressalvas pesam aqui. O limite legal incide sobre o agregado da despesa
-  primária de cada Poder e órgão autônomo, nunca sobre a ação individual: uma ação
-  crescer acima da taxa não configura descumprimento de nada, e o conjunto pode caber
-  no limite com muitas ações acima e muitas abaixo. E parte da despesa está fora do
-  limite por disposição legal, de modo que a soma das ações do painel não reproduz a
-  base de cálculo do regime.</p>
-
   <h3>O que entra na triagem</h3>
   <p>Desvio grande em ação pequena é ruído. Todas as regras têm piso de
-  materialidade e a ordenação padrão é por reais, não por percentual. Ações com
-  resultado primário obrigatório aparecem na base, mas ficam fora do ranking de
-  oportunidades: revisão de gasto obrigatório não se resolve no ciclo orçamentário,
-  e sinalizá-la como desvio contamina a lista. Encargos especiais e reserva de
-  contingência seguem a mesma regra.</p>
-
-  <p>O escore de desvio atípico usa mediana e desvio absoluto mediano dentro de
-  cada função, não média e desvio-padrão: a distribuição de variações
-  orçamentárias é assimétrica e alguns poucos valores extremos deslocariam a média
-  o suficiente para esconder o resto.</p>
+  materialidade e a ordenação inicial é por reais, não por percentual. Ações com
+  resultado primário obrigatório aparecem na base, mas ficam fora do bloco de
+  despesas que demandam atenção: revisão de gasto obrigatório não se resolve no
+  ciclo orçamentário, e sinalizá-la como desvio contamina a lista. Encargos
+  especiais e reserva de contingência seguem a mesma regra.</p>
 
   <h3>Onde isso se encaixa</h3>
   <p>Uma revisão de gasto, no sentido em que a OCDE e o FMI usam o termo, é a
   análise sistemática da despesa de base para identificar economias e realocação,
   amarrada ao calendário do orçamento. Este painel cobre apenas o primeiro passo
-  dessa cadeia, a identificação do que demanda atenção. Ele não mede eficiência, não avalia
-  resultado e não substitui a análise feita com a unidade responsável pela
+  dessa cadeia, identificar o que demanda atenção. Ele não mede eficiência, não
+  avalia resultado e não substitui a análise feita com a unidade responsável pela
   política.</p>
 
   <h3>Limites conhecidos</h3>
@@ -176,8 +139,8 @@
     índices setoriais dariam leitura diferente.</li>
   </ul>
 
-  <p class="fonte" id="rodape">Fonte: SIOP, via pacote orcamentoBR; execução mensal
-  consolidada do Portal da Transparência; IPCA na série 433 do Banco Central.</p>
+  <p class="fonte">Fonte: SIOP, via pacote orcamentoBR; execução mensal consolidada
+  do Portal da Transparência; IPCA na série 433 do Banco Central.</p>
 </section>
 
 </main>
