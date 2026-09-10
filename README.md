@@ -1,8 +1,7 @@
 # Painel de revisão de gastos
 
-Triagem diária das ações orçamentárias federais que se afastam de três parâmetros:
-o previsto na LOA, o executado no mesmo período do exercício anterior em termos reais,
-e o crescimento admitido pelo Regime Fiscal Sustentável.
+Triagem diária das ações orçamentárias federais que se afastam de dois parâmetros:
+o previsto na LOA e o executado no mesmo período do exercício anterior, em termos reais.
 
 Fontes: SIOP, pelo pacote R [orcamentoBR](https://cran.r-project.org/package=orcamentoBR);
 execução mensal consolidada da despesa, no Portal da Transparência; IPCA, na série 433 do SGS/Banco Central.
@@ -45,7 +44,7 @@ Mexer neles é a forma prevista de calibrar o painel.
 
 ---
 
-## Os três parâmetros
+## Os dois parâmetros
 
 **Contra a LOA.** Comparar empenho com dotação integral no meio do ano não informa nada,
 porque nenhuma ação gasta um doze avos por mês. O valor esperado para hoje é a dotação
@@ -59,22 +58,6 @@ mês do exercício anterior, ambos a preços do mês de referência, deflacionad
 A consulta ao SIOP devolve valores acumulados no instante do acesso, sem dimensão de mês —
 daí a necessidade do histórico mensal do Portal da Transparência.
 
-**Contra o Regime Fiscal Sustentável.** A LC 200/2023 admite crescimento real da despesa
-primária entre 0,6% e 2,5% ao ano, dentro desse intervalo atrelado a 70% da variação real
-da receita primária quando a meta de resultado do exercício anterior foi cumprida, e a 50%
-quando não foi. O painel toma a taxa de referência do exercício, definida em `RFS_TAXA` no
-workflow, e calcula quanto cada ação teria empenhado se tivesse crescido exatamente nela.
-Como o indexador de correção do próprio limite é o IPCA, o deflator do painel e a régua do
-regime falam a mesma língua.
-
-Duas ressalvas pesam. O limite legal incide sobre o agregado da despesa primária de cada
-Poder e órgão autônomo, nunca sobre a ação individual: uma ação crescer acima da taxa não
-configura descumprimento de nada, e o conjunto pode caber no limite com muitas ações acima
-e muitas abaixo. E parte da despesa está fora do limite por disposição legal, de modo que a
-soma das ações do painel não reproduz a base de cálculo do regime. Por isso o painel também
-mostra, no alto do bloco de gráficos, o crescimento real do agregado comparável ao lado da
-banda de 0,6% a 2,5%.
-
 ---
 
 ## Regras de triagem
@@ -85,11 +68,9 @@ banda de 0,6% a 2,5%.
 | Dotação sem execução | Execução abaixo de 5% em t e de 10% em t−1, já passada a metade do perfil anual | Dotação menos empenhado |
 | Dotação inflada por créditos | Dotação 30% acima da LOA | Dotação menos LOA |
 | Expansão real acelerada | Crescimento real acima de 15% contra o mesmo período | Diferença em reais |
-| Acima do crescimento do regime fiscal | Crescimento real acima da taxa de referência do RFS | Diferença contra o empenho que a taxa implicaria |
 | Retração real acentuada | Queda real acima de 15% | — |
 | Execução pulverizada | Mesma ação com dotação abaixo de R$ 5 mi em 10 ou mais unidades | — |
 | Concentração em dezembro | Mais de 40% do empenho de t−1 feito em dezembro | — |
-| Desvio atípico na função | Escore robusto acima de 3 dentro da função | — |
 
 Todas exigem materialidade mínima de R$ 50 milhões, salvo indicação em contrário.
 Ações com resultado primário obrigatório permanecem na base e nos agregados, mas ficam
@@ -114,7 +95,7 @@ apurada nem uma redução proposta.
 - Ações criadas ou reestruturadas no exercício não têm par em t−1: a variação real fica vazia.
 - Mudanças na estrutura programática quebram a série; um salto pode ser recodificação.
 - O IPCA é o deflator de todas as séries, por decisão de projeto e por coerência com o
-  indexador do próprio limite do regime fiscal. Índices setoriais dariam leitura diferente
+  indexador de correção usado na regra fiscal. Índices setoriais dariam leitura diferente
   para pessoal e para obras.
 - O arquivo mensal do Portal da Transparência pode não trazer unidade orçamentária. O
   pipeline tenta casar por UO e ação e, se falhar, por órgão e ação. A cobertura efetiva
