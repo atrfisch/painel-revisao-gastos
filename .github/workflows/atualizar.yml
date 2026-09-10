@@ -56,10 +56,6 @@ jobs:
           cat("Pacotes prontos.\n")
 
       - name: Rodar o pipeline
-        env:
-          # Taxa de crescimento real de referência do Regime Fiscal Sustentável
-          # para o exercício. A banda da LC 200/2023 vai de 0,006 a 0,025.
-          RFS_TAXA: "0.025"
         run: Rscript R/pipeline.R
 
       - name: Publicar resultados
